@@ -426,7 +426,7 @@ void MainWindow::openSettingsWindow() {
 
     if (!settingsWindow) {
         settingsWindow = new SettingsWindow(archiveManager, cameraManager, this);
-        connect(settingsWindow, &SettingsWindow::cameraGroupsChanged,
+        connect(settingsWindow, &SettingsWindow::groupsMembershipsChanged,
                 this, [this]() { reloadGroupsFromDb(); });
     }
     settingsWindow->setWindowFlags(Qt::Window | Qt::FramelessWindowHint);

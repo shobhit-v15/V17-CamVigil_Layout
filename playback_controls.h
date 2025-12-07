@@ -12,6 +12,7 @@ public:
     explicit PlaybackControlsWidget(QWidget* parent=nullptr);
     void setGoIdle();
     void setGoBusy();
+    void setGroupList(const QStringList& names, int currentIndex);
     void setCameraList(const QStringList& names);
     QString selectedCamera() const;
     QDate   selectedDate()  const;
@@ -23,10 +24,12 @@ public:
     void setAvailableDates(const QSet<QDate>& dates);
     QPushButton* goBtn{nullptr};
 signals:
+    void groupChanged(int index);
     void cameraChanged(const QString& name);
     void dateChanged(const QDate& date);
     void goPressed(const QString& cameraName, const QDate& date);
 private:
+    QComboBox* groupCombo{nullptr};
     QComboBox* cameraCombo{nullptr};
     QDateEdit* dateEdit{nullptr};
     QSet<QDate> availableDates_;

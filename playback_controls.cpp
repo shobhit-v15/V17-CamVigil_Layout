@@ -21,6 +21,18 @@ PlaybackControlsWidget::PlaybackControlsWidget(QWidget* parent)
     layout->setContentsMargins(0,0,0,0);
     layout->setSpacing(10);
 
+    auto* groupLabel = new QLabel(tr("Group:"), this);
+    groupLabel->setStyleSheet("color:#ddd; font-weight:bold;");
+    groupCombo = new QComboBox(this);
+    groupCombo->setMinimumWidth(140);
+    groupCombo->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    connect(groupCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index){
+                emit groupChanged(index);
+            });
+
+    auto* camLabel = new QLabel(tr("Camera:"), this);
+    camLabel->setStyleSheet("color:#ddd; font-weight:bold;");
     cameraCombo = new QComboBox(this);
     cameraCombo->setMinimumWidth(200);
     connect(cameraCombo, &QComboBox::currentTextChanged,
@@ -54,7 +66,11 @@ PlaybackControlsWidget::PlaybackControlsWidget(QWidget* parent)
 
     // add to layout (right of date):
 
-    layout->addWidget(cameraCombo);
+    layout->addWidget(groupLabel);
+    layout->addWidget(groupCombo, 1);
+    layout->addSpacing(8);
+    layout->addWidget(camLabel);
+    layout->addWidget(cameraCombo, 1);
     layout->addWidget(dateEdit);
     layout->addWidget(goBtn);
     setLayout(layout);
@@ -71,11 +87,32 @@ void PlaybackControlsWidget::setGoBusy() {
     goBtn->setEnabled(false);
     goBtn->setText("Building…");
 }
+void PlaybackControlsWidget::setGroupList(const QStringList& names, int currentIndex) {
+    if (!groupCombo) return;
+    QSignalBlocker blocker(groupCombo);
+    groupCombo->clear();
+    if (!names.isEmpty()) {
+        groupCombo->addItems(names);
+        if (currentIndex >= 0 && currentIndex < names.size()) {
+            groupCombo->setCurrentIndex(currentIndex);
+        } else {
+            groupCombo->setCurrentIndex(0);
+        }
+        groupCombo->setEnabled(true);
+    } else {
+        groupCombo->setEnabled(false);
+    }
+}
 
 void PlaybackControlsWidget::setCameraList(const QStringList& names) {
+    if (!cameraCombo) return;
+    QSignalBlocker blocker(cameraCombo);
     cameraCombo->clear();
-    cameraCombo->addItems(names.isEmpty() ? QStringList{"All Cameras"} : names);
-    if (cameraCombo->count() > 0) cameraCombo->setCurrentIndex(0);
+    cameraCombo->addItems(names);
+    if (cameraCombo->count() > 0) {
+        cameraCombo->setCurrentIndex(0);
+    }
+    cameraCombo->setEnabled(cameraCombo->count() > 0);
 }
 
 QString PlaybackControlsWidget::selectedCamera() const { return cameraCombo->currentText(); }

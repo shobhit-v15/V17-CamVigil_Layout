@@ -122,9 +122,8 @@ SettingsWindow::SettingsWindow(ArchiveManager* archiveManager,
         cameraDetailsWidget = new CameraDetailsWidget(cameraManager, dbPath, this);
         cameraDetailsWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         scrollLayout->addWidget(cameraDetailsWidget, 0, Qt::AlignLeft);
-
-        connect(cameraDetailsWidget, &CameraDetailsWidget::cameraGroupsChanged,
-                this, &SettingsWindow::cameraGroupsChanged);
+        connect(cameraDetailsWidget, &CameraDetailsWidget::groupsMembershipsChanged,
+                this, &SettingsWindow::groupsMembershipsChanged);
     } else {
         qWarning() << "[SettingsWindow] cameraManager is null; skipping CameraDetailsWidget";
     }

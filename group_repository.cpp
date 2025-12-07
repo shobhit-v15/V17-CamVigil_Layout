@@ -409,3 +409,29 @@ bool GroupRepository::setCameraGroups(int cameraId, const QVector<int>& groupIds
 
     return true;
 }
+
+QVector<CameraRowInfo> GroupRepository::listAllCameras()
+{
+    QVector<CameraRowInfo> out;
+    if (!open()) {
+        return out;
+    }
+
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "SELECT id, COALESCE(name, ''), COALESCE(main_url, '') "
+        "FROM cameras ORDER BY name, id;"));
+    if (!q.exec()) {
+        qWarning() << "[GroupRepository] listAllCameras error:" << q.lastError().text();
+        return out;
+    }
+
+    while (q.next()) {
+        CameraRowInfo row;
+        row.id = q.value(0).toInt();
+        row.name = q.value(1).toString();
+        row.mainUrl = q.value(2).toString();
+        out.push_back(row);
+    }
+    return out;
+}

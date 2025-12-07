@@ -18,6 +18,8 @@
 #include "storageservice.h"
 #include <QMessageBox>
 #include <QApplication>
+#include <QSet>
+#include <algorithm>
 
 PlaybackWindow::PlaybackWindow(QWidget* parent)
     : QWidget(parent)
@@ -80,6 +82,8 @@ PlaybackWindow::PlaybackWindow(QWidget* parent)
     qRegisterMetaType<CamList>("CamList");
     qRegisterMetaType<SegmentList>("SegmentList");
 
+    connect(controls, &PlaybackControlsWidget::groupChanged,
+            this, &PlaybackWindow::onUiGroupChanged);
     connect(controls, &PlaybackControlsWidget::cameraChanged,
             this, &PlaybackWindow::onUiCameraChanged);
     //connect(controls, &PlaybackControlsWidget::dateChanged,
@@ -294,6 +298,11 @@ void PlaybackWindow::stopStitch_() {
 
 void PlaybackWindow::setCameraList(const QStringList& names) {
     controls->setCameraList(names);
+    if (!names.isEmpty()) {
+        onUiCameraChanged(names.first());
+    } else {
+        onUiCameraChanged(QString());
+    }
 }
 QString PlaybackWindow::tid() {
     // QThread::currentThreadId() returns a pointer-like handle; stringify as hex
@@ -364,30 +373,207 @@ void PlaybackWindow::openDb(const QString& dbPath) {
             qInfo() << "[PW] Camera resolver: '" << name << "' -> ID" << id;
             return id;
         });
+        initGroupRepository(dbPath);
         controls->setGoIdle();
     // Fetch cameras
     QMetaObject::invokeMethod(db, "listCameras", Qt::QueuedConnection);
 }
-void PlaybackWindow::onCamerasReady(const CamList& cams) {
-    camIds.clear(); nameToId.clear();
-    QStringList names; names.reserve(cams.size());
+void PlaybackWindow::initGroupRepository(const QString& dbPath) {
+    if (dbPath.isEmpty() || m_groupRepo) {
+        return;
+    }
+    auto repo = std::make_unique<GroupRepository>(dbPath);
+    if (!repo->ensureSchemaGroups()) {
+        qWarning() << "[Playback] Unable to prepare group schema for" << dbPath;
+        return;
+    }
+    qInfo() << "[Playback] Group repository ready for playback at" << dbPath;
+    m_groupRepo = std::move(repo);
+}
+void PlaybackWindow::buildPlaybackGroupsFromDb() {
+    m_groups.clear();
+    if (!m_groupRepo) {
+        return;
+    }
 
-    qInfo() << "[PW] onCamerasReady - received" << cams.size() << "cameras from database:";
+    const QString allName = QStringLiteral("All Cameras");
+    QVector<CameraGroupInfo> dbGroups = m_groupRepo->listGroups();
+    auto appendAllGroup = [&](int groupId, const QString& name) {
+        PlaybackGroup g;
+        g.id = groupId;
+        g.name = name;
+        for (int camId : camIds) {
+            const auto it = m_recordingCameraNames.find(camId);
+            if (it == m_recordingCameraNames.end()) continue;
+            g.cameraIds.push_back(camId);
+            g.cameraNames.push_back(it.value());
+        }
+        m_groups.push_back(std::move(g));
+    };
+
+    if (dbGroups.isEmpty()) {
+        appendAllGroup(-1, allName);
+    } else {
+        bool allInserted = false;
+        for (const auto& info : dbGroups) {
+            if (info.name == allName) {
+                appendAllGroup(info.id, info.name);
+                allInserted = true;
+                break;
+            }
+        }
+        if (!allInserted) {
+            appendAllGroup(-1, allName);
+        }
+
+        QSet<int> recordingIds;
+        for (auto it = m_recordingCameraNames.constBegin();
+             it != m_recordingCameraNames.constEnd(); ++it) {
+            recordingIds.insert(it.key());
+        }
+        for (const auto& info : dbGroups) {
+            if (info.name == allName) {
+                continue;
+            }
+            PlaybackGroup g;
+            g.id = info.id;
+            g.name = info.name;
+            QVector<int> dbCamIds = m_groupRepo->listCameraIdsForGroup(info.id);
+            for (int camId : dbCamIds) {
+                if (!recordingIds.contains(camId)) continue;
+                const auto it = m_recordingCameraNames.find(camId);
+                if (it == m_recordingCameraNames.end()) continue;
+                g.cameraIds.push_back(camId);
+                g.cameraNames.push_back(it.value());
+            }
+            m_groups.push_back(std::move(g));
+        }
+    }
+    qInfo() << "[Playback] buildPlaybackGroupsFromDb: groups=" << m_groups.size();
+    for (const auto& g : m_groups) {
+        qInfo() << "   group" << g.name << "cameras=" << g.cameraIds.size();
+    }
+}
+void PlaybackWindow::applyCurrentPlaybackGroupToCameraCombo() {
+    QStringList names;
+    nameToId.clear();
+
+    if (m_groupRepo &&
+        m_currentGroupIndex >= 0 &&
+        m_currentGroupIndex < static_cast<int>(m_groups.size())) {
+        const PlaybackGroup& g = m_groups[m_currentGroupIndex];
+        qInfo() << "[Playback] applying group" << g.name
+                << "index" << m_currentGroupIndex
+                << "cameras" << g.cameraNames.size();
+        const int count = std::min(g.cameraIds.size(), g.cameraNames.size());
+        names.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            names << g.cameraNames.at(i);
+            nameToId.insert(g.cameraNames.at(i), g.cameraIds.at(i));
+        }
+    } else {
+        qInfo() << "[Playback] applying fallback group (all cameras)"
+                << "count" << camIds.size();
+        names.reserve(camIds.size());
+        for (int camId : camIds) {
+            const auto it = m_recordingCameraNames.find(camId);
+            if (it == m_recordingCameraNames.end()) continue;
+            names << it.value();
+            nameToId.insert(it.value(), camId);
+        }
+    }
+
+    setCameraList(names);
+}
+void PlaybackWindow::onCamerasReady(const CamList& cams) {
+    camIds.clear();
+    nameToId.clear();
+    m_recordingCameraNames.clear();
+
+    qInfo() << "[Playback] onCamerasReady: cams from DbReader =" << cams.size();
     for (const auto& p : cams) {
         qInfo() << "  ID:" << p.first << "Name:" << p.second;
         camIds << p.first;
-        nameToId.insert(p.second, p.first);
-        names << p.second;
+        m_recordingCameraNames.insert(p.first, p.second);
     }
-    
-    setCameraList(names);  // this calls controls->setCameraList(names)
+
+    if (m_recordingCameraNames.isEmpty() && m_groupRepo) {
+        const auto allCams = m_groupRepo->listAllCameras();
+        qInfo() << "[Playback] DbReader returned no cameras, fallback to GroupRepository list size"
+                << allCams.size();
+        for (const auto& row : allCams) {
+            QString name = row.name.trimmed();
+            if (name.isEmpty()) {
+                name = row.mainUrl.trimmed();
+            }
+            if (name.isEmpty()) {
+                name = QStringLiteral("Camera %1").arg(row.id);
+            }
+            camIds << row.id;
+            m_recordingCameraNames.insert(row.id, name);
+        }
+    }
+
+    qInfo() << "[Playback] m_recordingCameraNames after fallback =" << m_recordingCameraNames.size();
+
+    if (!m_groupRepo) {
+        QStringList names;
+        names.reserve(camIds.size());
+        for (int camId : camIds) {
+            const auto it = m_recordingCameraNames.find(camId);
+            if (it == m_recordingCameraNames.end()) {
+                continue;
+            }
+            names << it.value();
+            nameToId.insert(it.value(), camId);
+        }
+        controls->setGroupList(QStringList(), -1);
+        m_currentGroupIndex = -1;
+        setCameraList(names);
         if (!names.isEmpty()) {
+            controls->setDate(QDate::currentDate());
+        }
+        return;
+    }
+
+    if (m_recordingCameraNames.isEmpty()) {
+        qWarning() << "[Playback] No cameras available even after fallback; leaving combos empty.";
+        controls->setGroupList(QStringList(), -1);
+        m_currentGroupIndex = -1;
+        setCameraList(QStringList());
+        return;
+    }
+
+    buildPlaybackGroupsFromDb();
+
+    QStringList groupNames;
+    groupNames.reserve(static_cast<int>(m_groups.size()));
+    for (const auto& g : m_groups) {
+        groupNames << g.name;
+    }
+
+    if (!m_groups.empty()) {
+        if (m_currentGroupIndex < 0 ||
+            m_currentGroupIndex >= static_cast<int>(m_groups.size())) {
+            m_currentGroupIndex = 0;
+        }
+    } else {
+        m_currentGroupIndex = -1;
+    }
+
+    controls->setGroupList(groupNames, m_currentGroupIndex);
+    applyCurrentPlaybackGroupToCameraCombo();
+    if (!camIds.isEmpty()) {
         controls->setDate(QDate::currentDate());
-        //onUiCameraChanged(names.first());
     }
 }
 void PlaybackWindow::onUiCameraChanged(const QString& camName) {
     lastCamName_ = camName;
+    if (camName.isEmpty()) {
+        selectedCamId = -1;
+        qInfo() << "[Playback] cameraChanged -> <none>";
+        return;
+    }
     const int cid = nameToId.value(camName, -1);
     selectedCamId = cid;
     
@@ -405,6 +591,25 @@ void PlaybackWindow::onUiCameraChanged(const QString& camName) {
         qWarning() << "[Playback] This usually means the camera name doesn't match the database.";
         qWarning() << "[Playback] Check that camera names in cameras.json match those in the database.";
     }
+}
+void PlaybackWindow::onUiGroupChanged(int index) {
+    if (!m_groupRepo) {
+        m_currentGroupIndex = -1;
+        return;
+    }
+    if (index < 0 || index >= static_cast<int>(m_groups.size())) {
+        qWarning() << "[Playback] Invalid group index" << index << "size=" << m_groups.size();
+        return;
+    }
+    if (m_currentGroupIndex == index) {
+        return;
+    }
+    m_currentGroupIndex = index;
+    qInfo() << "[Playback] group changed to index" << index
+            << (index >= 0 && index < static_cast<int>(m_groups.size())
+                ? m_groups[index].name
+                : QStringLiteral("<out-of-range>"));
+    applyCurrentPlaybackGroupToCameraCombo();
 }
 void PlaybackWindow::onDaysReady(int cameraId, const QStringList& ymdList) {
     if (cameraId != selectedCamId) return;
@@ -680,6 +885,3 @@ void PlaybackWindow::runGoFor(const QString& camName, const QDate& day) {
         if (trimPanel)    trimPanel->setRangeNs(trim_.start_ns, trim_.end_ns);
         if (trimPanel)    trimPanel->setDurationLabel(trim_.end_ns - trim_.start_ns);
     }
-
-
-

@@ -63,7 +63,8 @@ SOURCES += \
     timeeditorwidget.cpp \
     toolbar.cpp \
     videoplayerwindow.cpp \
-    group_repository.cpp
+    group_repository.cpp \
+    camera_grouping_widget.cpp
 
 HEADERS += \
     archivemanager.h \
@@ -107,7 +108,8 @@ HEADERS += \
     timeeditorwidget.h \
     toolbar.h \
     videoplayerwindow.h \
-    group_repository.h
+    group_repository.h \
+    camera_grouping_widget.h
 
 FORMS += \
     mainwindow.ui

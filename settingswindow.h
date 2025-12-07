@@ -20,7 +20,7 @@ public:
                             QWidget *parent = nullptr);
 
 signals:
-    void cameraGroupsChanged();
+    void groupsMembershipsChanged();
 
 private slots:
     void closeWindow();

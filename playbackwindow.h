@@ -1,7 +1,11 @@
 #pragma once
 #include <QWidget>
 #include <QMap>
+#include <QHash>
+#include <memory>
+#include <vector>
 #include "db_reader.h"
+#include "group_repository.h"
 #include "playback_controls.h"
 #include "playback_timeline_controller.h"
 #include "playback_segment_index.h"
@@ -17,6 +21,13 @@ class PlaybackVideoPlayerGst;
 class QThread;
 class PlaybackStitchingPlayer;
 class PlaybackExporter;
+
+struct PlaybackGroup {
+    int id = -1;
+    QString name;
+    QVector<int> cameraIds;
+    QStringList cameraNames;
+};
 
 class PlaybackWindow : public QWidget {
     Q_OBJECT
@@ -42,9 +53,13 @@ private:
 
     // --- Database ---
     DbReader* db{nullptr};
-    QVector<int> camIds;           // index-aligned with names we show
+    QVector<int> camIds;           // kept for legacy/fallback flows
     QMap<QString,int> nameToId;    // name → camera_id
     int selectedCamId = -1;
+    std::unique_ptr<GroupRepository> m_groupRepo;
+    std::vector<PlaybackGroup> m_groups;
+    int m_currentGroupIndex = -1;
+    QHash<int, QString> m_recordingCameraNames;
 
     // --- Timeline ---
     PlaybackTimelineController* timelineCtl{nullptr};
@@ -86,6 +101,9 @@ private:
     QThread*          exportThread_{nullptr};
     PlaybackExporter* exporter_{nullptr};
     QString           tmpClipPath_; // holds stage-1 result path
+    void initGroupRepository(const QString& dbPath);
+    void buildPlaybackGroupsFromDb();
+    void applyCurrentPlaybackGroupToCameraCombo();
 
 private slots:
     void onCamerasReady(const CamList& cams);
@@ -93,4 +111,5 @@ private slots:
     void onSegmentsReady(int cameraId, const SegmentList& segs);
     void onUiCameraChanged(const QString& camName);
     void onUiDateChanged(const QDate& date);
+    void onUiGroupChanged(int index);
 };

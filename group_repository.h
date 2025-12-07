@@ -9,6 +9,12 @@ struct CameraGroupInfo {
     QString name;
 };
 
+struct CameraRowInfo {
+    int id = -1;
+    QString name;
+    QString mainUrl;
+};
+
 class GroupRepository
 {
 public:
@@ -31,6 +37,7 @@ public:
     QVector<int> listCameraIdsForGroup(int groupId);
     QVector<int> listGroupIdsForCamera(int cameraId);
     bool setCameraGroups(int cameraId, const QVector<int>& groupIds);
+    QVector<CameraRowInfo> listAllCameras();
 
 private:
     QString m_dbPath;
