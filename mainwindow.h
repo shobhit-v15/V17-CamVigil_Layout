@@ -55,6 +55,7 @@ private slots:
     void previousPage();
 
     void onGroupChanged(int index);
+    void onLayoutModeChanged(bool isDefault);
 
 private:
     Ui::MainWindow *ui;
