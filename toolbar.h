@@ -29,6 +29,7 @@ signals:
     void previousPageRequested();
 
     void groupChanged(int index);
+    void layoutModeChanged(bool isDefault);
 
 private slots:
     void updateClock();
@@ -36,6 +37,8 @@ private slots:
 
     void onPrevPageClicked();
     void onNextPageClicked();
+    void onDefaultLayoutClicked();
+    void onCustomLayoutClicked();
 
 private:
     QLabel* clockLabel;
@@ -47,6 +50,9 @@ private:
 
     QPushButton* prevPageButton;
     QPushButton* nextPageButton;
+
+    QPushButton* defaultLayoutButton;
+    QPushButton* customLayoutButton;
 
     QComboBox* groupCombo;
 

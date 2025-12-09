@@ -16,6 +16,8 @@ Toolbar::Toolbar(QWidget* parent)
     , playbackButton(nullptr)
     , prevPageButton(nullptr)
     , nextPageButton(nullptr)
+    , defaultLayoutButton(nullptr)
+    , customLayoutButton(nullptr)
     , groupCombo(nullptr)
     , clockTimer(new QTimer(this))
     , networkManager(new QNetworkAccessManager(this))
@@ -37,10 +39,64 @@ Toolbar::Toolbar(QWidget* parent)
     grid->setColumnStretch(1, 0);   // center (clock)
     grid->setColumnStretch(2, 1);   // right space (buttons)
 
-    // Left: Status label
+    QWidget* leftBox = new QWidget(this);
+    auto* left = new QHBoxLayout(leftBox);
+    left->setContentsMargins(0, 0, 0, 0);
+    left->setSpacing(10);
+
+    defaultLayoutButton = new QPushButton("Default", this);
+    customLayoutButton = new QPushButton("Custom", this);
+
+    const char* layoutButtonStyle =
+        "QPushButton {"
+        "   color: white;"
+        "   padding: 6px 16px;"
+        "   font-weight: 700;"
+        "   font-size: 16px;"
+        "   border: 1px solid #666;"
+        "   border-radius: 4px;"
+        "   background-color: #2a2a2a;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #3a3a3a;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #1a1a1a;"
+        "}";
+
+    const char* layoutButtonSelectedStyle =
+        "QPushButton {"
+        "   color: white;"
+        "   padding: 6px 16px;"
+        "   font-weight: 700;"
+        "   font-size: 16px;"
+        "   border: 2px solid #4a9eff;"
+        "   border-radius: 4px;"
+        "   background-color: #1e3a5f;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #2a4a6f;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #1a2a4f;"
+        "}";
+
+    defaultLayoutButton->setStyleSheet(layoutButtonSelectedStyle);
+    customLayoutButton->setStyleSheet(layoutButtonStyle);
+
+    connect(defaultLayoutButton, &QPushButton::clicked, this, &Toolbar::onDefaultLayoutClicked);
+    connect(customLayoutButton, &QPushButton::clicked, this, &Toolbar::onCustomLayoutClicked);
+
+    left->addWidget(defaultLayoutButton);
+    left->addWidget(customLayoutButton);
+
     statusLabel = new QLabel("Standalone Mode", this);
-    statusLabel->setStyleSheet("color: orange; font-size: 18px; padding-left: 5px;");
-    grid->addWidget(statusLabel, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    statusLabel->setStyleSheet("color: orange; font-size: 18px; padding-left: 15px;");
+    left->addWidget(statusLabel);
+
+    left->addStretch();
+
+    grid->addWidget(leftBox, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
 
     // Center: Clock label
     clockLabel = new QLabel(this);
@@ -195,4 +251,90 @@ void Toolbar::onPrevPageClicked() {
 
 void Toolbar::onNextPageClicked() {
     emit nextPageRequested();
+}
+
+void Toolbar::onDefaultLayoutClicked() {
+    if (!defaultLayoutButton || !customLayoutButton) return;
+
+    const char* selectedStyle =
+        "QPushButton {"
+        "   color: white;"
+        "   padding: 6px 16px;"
+        "   font-weight: 700;"
+        "   font-size: 16px;"
+        "   border: 2px solid #4a9eff;"
+        "   border-radius: 4px;"
+        "   background-color: #1e3a5f;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #2a4a6f;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #1a2a4f;"
+        "}";
+
+    const char* unselectedStyle =
+        "QPushButton {"
+        "   color: white;"
+        "   padding: 6px 16px;"
+        "   font-weight: 700;"
+        "   font-size: 16px;"
+        "   border: 1px solid #666;"
+        "   border-radius: 4px;"
+        "   background-color: #2a2a2a;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #3a3a3a;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #1a1a1a;"
+        "}";
+
+    defaultLayoutButton->setStyleSheet(selectedStyle);
+    customLayoutButton->setStyleSheet(unselectedStyle);
+
+    emit layoutModeChanged(true);
+}
+
+void Toolbar::onCustomLayoutClicked() {
+    if (!defaultLayoutButton || !customLayoutButton) return;
+
+    const char* selectedStyle =
+        "QPushButton {"
+        "   color: white;"
+        "   padding: 6px 16px;"
+        "   font-weight: 700;"
+        "   font-size: 16px;"
+        "   border: 2px solid #4a9eff;"
+        "   border-radius: 4px;"
+        "   background-color: #1e3a5f;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #2a4a6f;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #1a2a4f;"
+        "}";
+
+    const char* unselectedStyle =
+        "QPushButton {"
+        "   color: white;"
+        "   padding: 6px 16px;"
+        "   font-weight: 700;"
+        "   font-size: 16px;"
+        "   border: 1px solid #666;"
+        "   border-radius: 4px;"
+        "   background-color: #2a2a2a;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #3a3a3a;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #1a1a1a;"
+        "}";
+
+    customLayoutButton->setStyleSheet(selectedStyle);
+    defaultLayoutButton->setStyleSheet(unselectedStyle);
+
+    emit layoutModeChanged(false);
 }

@@ -51,6 +51,10 @@ MainWindow::MainWindow(QWidget *parent)
     connect(toolbar, &Toolbar::groupChanged,
             this, &MainWindow::onGroupChanged);
 
+    // Layout mode selection from toolbar
+    connect(toolbar, &Toolbar::layoutModeChanged,
+            this, &MainWindow::onLayoutModeChanged);
+
     // CameraManager + profiles
     cameraManager = new CameraManager();
     std::vector<CamHWProfile> profiles = cameraManager->getCameraProfiles();
@@ -347,6 +351,13 @@ void MainWindow::onGroupChanged(int index) {
     }
     m_currentGroupIndex = index;
     applyCurrentGroupToGrid();
+}
+
+void MainWindow::onLayoutModeChanged(bool isDefault) {
+    if (isDefault) {
+        refreshGrid();
+    } else {
+    }
 }
 
 void MainWindow::refreshGrid() {
