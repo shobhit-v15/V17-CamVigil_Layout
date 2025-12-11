@@ -29,7 +29,9 @@ MainWindow::MainWindow(QWidget *parent)
     , settingsWindow(nullptr)
     , fullScreenViewer(new FullScreenViewer)
     , timeSyncTimer(nullptr)
-    , gridState(9)  // fixed 3x3 => 9 cameras per page
+    , gridState(9)
+    , m_isCustomLayout(false)
+    , m_primaryCameraIndex(0)  // fixed 3x3 => 9 cameras per page
 {
     ui->setupUi(this);
 
@@ -80,8 +82,6 @@ MainWindow::MainWindow(QWidget *parent)
         label->setStyleSheet(
             "border:2px solid #333; "
             "border-radius:5px; "
-            "margin:5px; "
-            "padding:5px; "
             "background:#000;"
         );
         label->showLoading();
@@ -339,8 +339,20 @@ void MainWindow::applyCurrentGroupToGrid() {
 void MainWindow::updateToolbarPageInfo() {
     if (!toolbar) return;
 
-    const int page1Based  = gridState.currentPage() + 1;
-    const int totalPages  = gridState.totalPages();
+    int page1Based;
+    int totalPages;
+
+    if (m_isCustomLayout) {
+        const int camerasPerCustomPage = 9;
+        const int visibleCount = static_cast<int>(visibleOrder.size());
+        totalPages = (visibleCount + camerasPerCustomPage - 1) / camerasPerCustomPage;
+        if (totalPages < 1) totalPages = 1;
+        page1Based = gridState.currentPage() + 1;
+        if (page1Based > totalPages) page1Based = totalPages;
+    } else {
+        page1Based = gridState.currentPage() + 1;
+        totalPages = gridState.totalPages();
+    }
 
     toolbar->setPageInfo(page1Based, totalPages);
 }
@@ -354,16 +366,35 @@ void MainWindow::onGroupChanged(int index) {
 }
 
 void MainWindow::onLayoutModeChanged(bool isDefault) {
-    if (isDefault) {
-        refreshGrid();
-    } else {
-    }
+    m_isCustomLayout = !isDefault;
+    gridState.setCurrentPage(0);
+    updateToolbarPageInfo();
+    refreshGrid();
 }
 
 void MainWindow::refreshGrid() {
-    // Robustness checks
+    if (m_isCustomLayout) {
+        refreshGridCustom();
+    } else {
+        refreshGridDefault();
+    }
+}
+
+void MainWindow::refreshGridDefault() {
     Q_ASSERT(static_cast<int>(visibleOrder.size()) <= static_cast<int>(labels.size()));
     Q_ASSERT(static_cast<int>(emptySlots.size()) == gridState.camerasPerPage());
+
+    gridLayout->setSpacing(10);
+    gridLayout->setContentsMargins(10, 10, 10, 10);
+
+    for (int r = 0; r < 4; ++r) {
+        gridLayout->setRowStretch(r, r < 3 ? 1 : 0);
+        gridLayout->setRowMinimumHeight(r, 0);
+    }
+    for (int c = 0; c < 5; ++c) {
+        gridLayout->setColumnStretch(c, c < 3 ? 1 : 0);
+        gridLayout->setColumnMinimumWidth(c, 0);
+    }
 
     std::vector<QWidget*> pageWidgets;
     pageWidgets.reserve(gridState.camerasPerPage());
@@ -371,7 +402,7 @@ void MainWindow::refreshGrid() {
     const int page      = gridState.currentPage();
     const int slotCount = gridState.camerasPerPage();
 
-    qInfo() << "[MainWindow] refreshGrid page" << page
+    qInfo() << "[MainWindow] refreshGridDefault page" << page
             << "visibleCount" << gridState.visibleCount()
             << "visibleOrder.size" << visibleOrder.size();
 
@@ -391,13 +422,13 @@ void MainWindow::refreshGrid() {
             }
 
             QWidget* w = labels[globalIndex];
+            w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
             qInfo() << "  slot" << slot
                     << "visibleIndex" << visibleIndex
                     << "globalIndex" << globalIndex
                     << "-> camera label";
 
-            // Optional: debug properties
             w->setProperty("pageIndex", page);
             w->setProperty("slotIndex", slot);
             w->setProperty("visibleIndex", visibleIndex);
@@ -417,16 +448,117 @@ void MainWindow::refreshGrid() {
     layoutManager->apply(pageWidgets);
 }
 
+void MainWindow::refreshGridCustom() {
+    const int camerasPerCustomPage = 9;
+    const int page = gridState.currentPage();
+    const int startIndex = page * camerasPerCustomPage;
+    
+    qInfo() << "[MainWindow] refreshGridCustom page" << page
+            << "visibleCount" << gridState.visibleCount()
+            << "startIndex" << startIndex;
+
+    QLayoutItem* item;
+    while ((item = gridLayout->takeAt(0)) != nullptr) {
+        if (QWidget* w = item->widget()) {
+            gridLayout->removeWidget(w);
+            w->hide();
+        }
+        delete item;
+    }
+
+    gridLayout->setSpacing(10);
+    gridLayout->setContentsMargins(10, 10, 10, 10);
+
+    for (int r = 0; r < 4; ++r) {
+        gridLayout->setRowStretch(r, 1);
+        gridLayout->setRowMinimumHeight(r, 120);
+    }
+    for (int c = 0; c < 5; ++c) {
+        gridLayout->setColumnStretch(c, 1);
+        gridLayout->setColumnMinimumWidth(c, 160);
+    }
+
+    int camerasToShow = std::min(camerasPerCustomPage, 
+                                 static_cast<int>(visibleOrder.size()) - startIndex);
+
+    for (int i = 0; i < camerasToShow; ++i) {
+        int visibleIndex = startIndex + i;
+        if (visibleIndex < 0 || visibleIndex >= static_cast<int>(visibleOrder.size())) {
+            continue;
+        }
+
+        int globalIndex = visibleOrder[visibleIndex];
+        if (globalIndex < 0 || globalIndex >= static_cast<int>(labels.size())) {
+            continue;
+        }
+
+        QWidget* w = labels[globalIndex];
+        w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        w->show();
+
+        if (i == 0) {
+            gridLayout->addWidget(w, 0, 0, 3, 4);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> main (0,0,3,4)";
+        } else if (i == 1) {
+            gridLayout->addWidget(w, 0, 4, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> right1 (0,4)";
+        } else if (i == 2) {
+            gridLayout->addWidget(w, 1, 4, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> right2 (1,4)";
+        } else if (i == 3) {
+            gridLayout->addWidget(w, 2, 4, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> right3 (2,4)";
+        } else if (i == 4) {
+            gridLayout->addWidget(w, 3, 0, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom1 (3,0)";
+        } else if (i == 5) {
+            gridLayout->addWidget(w, 3, 1, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom2 (3,1)";
+        } else if (i == 6) {
+            gridLayout->addWidget(w, 3, 2, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom3 (3,2)";
+        } else if (i == 7) {
+            gridLayout->addWidget(w, 3, 3, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom4 (3,3)";
+        } else if (i == 8) {
+            gridLayout->addWidget(w, 3, 4, 1, 1);
+            qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom5 (3,4)";
+        }
+    }
+}
+
 void MainWindow::nextPage() {
     qInfo() << "[MainWindow] nextPage() called";
-    gridState.nextPage();
+    
+    if (m_isCustomLayout) {
+        const int camerasPerCustomPage = 9;
+        const int visibleCount = static_cast<int>(visibleOrder.size());
+        const int totalPages = (visibleCount + camerasPerCustomPage - 1) / camerasPerCustomPage;
+        const int currentPage = gridState.currentPage();
+        
+        if (currentPage + 1 < totalPages) {
+            gridState.setCurrentPage(currentPage + 1);
+        }
+    } else {
+        gridState.nextPage();
+    }
+    
     updateToolbarPageInfo();
     refreshGrid();
 }
 
 void MainWindow::previousPage() {
     qInfo() << "[MainWindow] previousPage() called";
-    gridState.previousPage();
+    
+    if (m_isCustomLayout) {
+        const int currentPage = gridState.currentPage();
+        if (currentPage > 0) {
+            gridState.setCurrentPage(currentPage - 1);
+        }
+    } else {
+        gridState.previousPage();
+    }
+    
     updateToolbarPageInfo();
     refreshGrid();
 }

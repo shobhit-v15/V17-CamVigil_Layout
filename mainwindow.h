@@ -101,11 +101,16 @@ private:
     void syncGridStateWithVisibleOrder();
     void updateToolbarPageInfo();
     void refreshGrid();
+    void refreshGridDefault();
+    void refreshGridCustom();
 
     void initGroupRepository();
     void initGroupsAfterCamerasLoaded();
     void reloadGroupsFromDb();
     void applyCurrentGroupToGrid();
+
+    bool m_isCustomLayout;
+    int m_primaryCameraIndex;
 };
 
 #endif // MAINWINDOW_H
