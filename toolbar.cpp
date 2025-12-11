@@ -30,19 +30,26 @@ Toolbar::Toolbar(QWidget* parent)
         "padding: 10px;"
     );
 
-    // 3-column grid: [left/status] [center/clock] [right/controls]
+    // 4-column grid: [left/status] [layout-buttons] [center/clock] [right/controls]
     auto* grid = new QGridLayout(this);
     grid->setContentsMargins(10, 5, 10, 5);
     grid->setHorizontalSpacing(12);
 
-    grid->setColumnStretch(0, 1);   // left  space
-    grid->setColumnStretch(1, 0);   // center (clock)
-    grid->setColumnStretch(2, 1);   // right space (buttons)
+    grid->setColumnStretch(0, 1);   // left  space (status)
+    grid->setColumnStretch(1, 0);   // layout buttons (fixed width)
+    grid->setColumnStretch(2, 0);   // center (clock)
+    grid->setColumnStretch(3, 1);   // right space (buttons)
 
-    QWidget* leftBox = new QWidget(this);
-    auto* left = new QHBoxLayout(leftBox);
-    left->setContentsMargins(0, 0, 0, 0);
-    left->setSpacing(10);
+    // Left: Status label only
+    statusLabel = new QLabel("Standalone Mode", this);
+    statusLabel->setStyleSheet("color: orange; font-size: 18px; padding-left: 15px;");
+    grid->addWidget(statusLabel, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
+
+    // Layout buttons widget (between status and clock)
+    QWidget* layoutButtonsBox = new QWidget(this);
+    auto* layoutButtonsLayout = new QHBoxLayout(layoutButtonsBox);
+    layoutButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    layoutButtonsLayout->setSpacing(10);
 
     defaultLayoutButton = new QPushButton("Default", this);
     customLayoutButton = new QPushButton("Custom", this);
@@ -87,22 +94,17 @@ Toolbar::Toolbar(QWidget* parent)
     connect(defaultLayoutButton, &QPushButton::clicked, this, &Toolbar::onDefaultLayoutClicked);
     connect(customLayoutButton, &QPushButton::clicked, this, &Toolbar::onCustomLayoutClicked);
 
-    left->addWidget(defaultLayoutButton);
-    left->addWidget(customLayoutButton);
+    layoutButtonsLayout->addWidget(defaultLayoutButton);
+    layoutButtonsLayout->addWidget(customLayoutButton);
+    layoutButtonsBox->setLayout(layoutButtonsLayout);
 
-    statusLabel = new QLabel("Standalone Mode", this);
-    statusLabel->setStyleSheet("color: orange; font-size: 18px; padding-left: 15px;");
-    left->addWidget(statusLabel);
-
-    left->addStretch();
-
-    grid->addWidget(leftBox, 0, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    grid->addWidget(layoutButtonsBox, 0, 1, Qt::AlignCenter | Qt::AlignVCenter);
 
     // Center: Clock label
     clockLabel = new QLabel(this);
     clockLabel->setAlignment(Qt::AlignCenter);
     clockLabel->setStyleSheet("color: white; padding: 5px;");
-    grid->addWidget(clockLabel, 0, 1, Qt::AlignCenter);
+    grid->addWidget(clockLabel, 0, 2, Qt::AlignCenter);
 
     // Right: Playback + Settings + Pagination in a single row
     QWidget* rightBox = new QWidget(this);
@@ -184,7 +186,7 @@ Toolbar::Toolbar(QWidget* parent)
     right->addWidget(pageLabel);
     right->addWidget(nextPageButton);
 
-    grid->addWidget(rightBox, 0, 2, Qt::AlignRight | Qt::AlignVCenter);
+    grid->addWidget(rightBox, 0, 3, Qt::AlignRight | Qt::AlignVCenter);
     setLayout(grid);
 
     // Clock update
