@@ -4,12 +4,15 @@
 #include "glcontainerwidget.h"
 #include "hik_time.h"
 #include "playbackwindow.h"
+#include "storageservice.h"
+#include "node_services_bootstrap.h"
 
 #include <QResizeEvent>
 #include <QTimer>
 #include <QThread>
 #include <QFileInfo>
 #include <QDebug>
+#include <QDir>
 #include <numeric>      // std::iota
 #include <algorithm>    // std::min
 
@@ -129,6 +132,15 @@ MainWindow::MainWindow(QWidget *parent)
     // Archive manager
     archiveManager = new ArchiveManager(this);
     archiveManager->startRecording(profiles);
+
+    // === Node API PoC: begin ===
+    m_nodeServices = new NodeServicesBootstrap(archiveManager,
+                                               StorageService::instance(),
+                                               this);
+    if (!m_nodeServices->start()) {
+        qWarning() << "[Node API PoC] Failed to bootstrap node services.";
+    }
+    // === Node API PoC: end ===
 
     // Initialize grouping model after cameras and DB are ready
     initGroupsAfterCamerasLoaded();

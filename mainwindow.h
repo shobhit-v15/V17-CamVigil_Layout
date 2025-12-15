@@ -21,6 +21,9 @@
 #include "cameragridstate.h"
 #include "group_repository.h"
 
+class QThread;
+class NodeServicesBootstrap;
+
 class PlaybackWindow;
 
 QT_BEGIN_NAMESPACE
@@ -111,6 +114,9 @@ private:
 
     bool m_isCustomLayout;
     int m_primaryCameraIndex;
+
+    // Node API PoC
+    NodeServicesBootstrap* m_nodeServices = nullptr;
 };
 
 #endif // MAINWINDOW_H
