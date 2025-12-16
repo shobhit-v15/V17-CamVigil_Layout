@@ -6,8 +6,10 @@
 #include <QVBoxLayout>
 #include <QPointer>
 #include <QHash>
+#include <QPushButton>
 #include <vector>
 #include <memory>
+#include <functional>
 
 #include "layoutmanager.h"
 #include "streammanager.h"
@@ -111,6 +113,13 @@ private:
 
     bool m_isCustomLayout;
     int m_primaryCameraIndex;
+    bool m_isMainCameraLocked;
+    int m_lockedCameraGlobalIndex;
+    QPushButton* m_lockButton;
+
+    void toggleMainCameraLock();
+    void updateLockButton();
+    void swapSecondaryToMain(int clickedGlobalIndex);
 };
 
 #endif // MAINWINDOW_H

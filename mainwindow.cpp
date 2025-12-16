@@ -10,8 +10,12 @@
 #include <QThread>
 #include <QFileInfo>
 #include <QDebug>
-#include <numeric>      // std::iota
-#include <algorithm>    // std::min
+#include <QLabel>
+#include <QMetaType>
+#include <numeric>
+#include <algorithm>
+
+Q_DECLARE_METATYPE(QLabel*)
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -31,8 +35,12 @@ MainWindow::MainWindow(QWidget *parent)
     , timeSyncTimer(nullptr)
     , gridState(9)
     , m_isCustomLayout(false)
-    , m_primaryCameraIndex(0)  // fixed 3x3 => 9 cameras per page
+    , m_primaryCameraIndex(0)
+    , m_isMainCameraLocked(false)
+    , m_lockedCameraGlobalIndex(-1)
+    , m_lockButton(nullptr)
 {
+    qRegisterMetaType<QLabel*>("QLabel*");
     ui->setupUi(this);
 
     topNavbar = new Navbar(this);
@@ -85,9 +93,31 @@ MainWindow::MainWindow(QWidget *parent)
             "background:#000;"
         );
         label->showLoading();
+        
+        QLabel* cameraNameLabel = new QLabel(label);
+        QString cameraName = QString::fromStdString(profiles[i].displayName);
+        if (cameraName.isEmpty()) {
+            cameraName = QString("Camera %1").arg(i + 1);
+        }
+        cameraNameLabel->setText(cameraName);
+        cameraNameLabel->setStyleSheet(
+            "background: rgba(0,0,0,0.8);"
+            "color: white;"
+            "padding: 5px 10px;"
+            "border-radius: 3px;"
+            "font-size: 14px;"
+            "font-weight: bold;"
+        );
+        cameraNameLabel->setAlignment(Qt::AlignCenter);
+        cameraNameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+        cameraNameLabel->adjustSize();
+        cameraNameLabel->move(10, 10);
+        cameraNameLabel->show();
+        
+        label->setProperty("cameraNameLabel", QVariant::fromValue(cameraNameLabel));
+        
         labels.push_back(label);
 
-        // Optional debug properties for easier inspection
         label->setProperty("cameraIndex", i);
 
         connect(label, &ClickableLabel::clicked,
@@ -319,7 +349,6 @@ void MainWindow::applyCurrentGroupToGrid() {
 
     if (m_currentGroupIndex < 0 ||
         m_currentGroupIndex >= static_cast<int>(m_groups.size())) {
-        // Fallback: show all cameras
         visibleOrder.resize(totalCameras);
         std::iota(visibleOrder.begin(), visibleOrder.end(), 0);
     } else {
@@ -327,6 +356,22 @@ void MainWindow::applyCurrentGroupToGrid() {
         visibleOrder.insert(visibleOrder.end(),
                             g.cameraIndexes.begin(),
                             g.cameraIndexes.end());
+    }
+
+    if (m_isMainCameraLocked && m_lockedCameraGlobalIndex >= 0) {
+        bool lockedCameraInGroup = false;
+        for (int idx : visibleOrder) {
+            if (idx == m_lockedCameraGlobalIndex) {
+                lockedCameraInGroup = true;
+                break;
+            }
+        }
+        
+        if (!lockedCameraInGroup) {
+            qInfo() << "[Lock] Locked camera not in current group, unlocking";
+            m_isMainCameraLocked = false;
+            m_lockedCameraGlobalIndex = -1;
+        }
     }
 
     gridState.setVisibleCount(static_cast<int>(visibleOrder.size()));
@@ -343,9 +388,15 @@ void MainWindow::updateToolbarPageInfo() {
     int totalPages;
 
     if (m_isCustomLayout) {
-        const int camerasPerCustomPage = 9;
-        const int visibleCount = static_cast<int>(visibleOrder.size());
-        totalPages = (visibleCount + camerasPerCustomPage - 1) / camerasPerCustomPage;
+        int visibleCount = static_cast<int>(visibleOrder.size());
+        
+        if (m_isMainCameraLocked && m_lockedCameraGlobalIndex >= 0) {
+            int availableSecondary = visibleCount - 1;
+            totalPages = (availableSecondary + 7) / 8;
+        } else {
+            totalPages = (visibleCount + 8) / 9;
+        }
+        
         if (totalPages < 1) totalPages = 1;
         page1Based = gridState.currentPage() + 1;
         if (page1Based > totalPages) page1Based = totalPages;
@@ -366,10 +417,121 @@ void MainWindow::onGroupChanged(int index) {
 }
 
 void MainWindow::onLayoutModeChanged(bool isDefault) {
+    if (isDefault && m_isMainCameraLocked) {
+        m_isMainCameraLocked = false;
+        m_lockedCameraGlobalIndex = -1;
+        if (m_lockButton) {
+            m_lockButton->hide();
+        }
+    }
     m_isCustomLayout = !isDefault;
     gridState.setCurrentPage(0);
     updateToolbarPageInfo();
     refreshGrid();
+}
+
+void MainWindow::toggleMainCameraLock() {
+    const int currentPage = gridState.currentPage();
+    const int mainPosition = currentPage * 9;
+    
+    if (m_isMainCameraLocked) {
+        if (mainPosition < static_cast<int>(visibleOrder.size())) {
+            auto lockedIt = std::find(visibleOrder.begin(), visibleOrder.end(), m_lockedCameraGlobalIndex);
+            
+            if (lockedIt != visibleOrder.end()) {
+                int currentLockedPosition = std::distance(visibleOrder.begin(), lockedIt);
+                
+                if (currentLockedPosition != mainPosition) {
+                    int oldMainCamera = visibleOrder[mainPosition];
+                    std::swap(visibleOrder[mainPosition], visibleOrder[currentLockedPosition]);
+                    
+                    qInfo() << "[Unlock] Moved camera" << m_lockedCameraGlobalIndex
+                            << "from position" << currentLockedPosition
+                            << "to page" << (currentPage + 1) << "main position" << mainPosition;
+                    qInfo() << "[Unlock] Camera" << oldMainCamera << "moved to position" << currentLockedPosition;
+                }
+            }
+        }
+        
+        m_isMainCameraLocked = false;
+        m_lockedCameraGlobalIndex = -1;
+        qInfo() << "[Lock] Camera unlocked";
+    } else {
+        if (mainPosition < static_cast<int>(visibleOrder.size())) {
+            m_lockedCameraGlobalIndex = visibleOrder[mainPosition];
+            m_isMainCameraLocked = true;
+            qInfo() << "[Lock] Camera" << m_lockedCameraGlobalIndex << "locked on page" << (currentPage + 1);
+        }
+    }
+    
+    updateToolbarPageInfo();
+    refreshGrid();
+}
+
+void MainWindow::swapSecondaryToMain(int clickedGlobalIndex) {
+    if (!m_isCustomLayout || m_isMainCameraLocked) {
+        return;
+    }
+    
+    const int currentPage = gridState.currentPage();
+    const int mainPosition = currentPage * 9;
+    
+    if (mainPosition >= static_cast<int>(visibleOrder.size())) {
+        return;
+    }
+    
+    auto clickedIt = std::find(visibleOrder.begin(), visibleOrder.end(), clickedGlobalIndex);
+    if (clickedIt == visibleOrder.end()) {
+        return;
+    }
+    
+    int clickedPosition = std::distance(visibleOrder.begin(), clickedIt);
+    int oldMainCamera = visibleOrder[mainPosition];
+    
+    std::swap(visibleOrder[mainPosition], visibleOrder[clickedPosition]);
+    
+    qInfo() << "[Swap] Page" << (currentPage + 1) 
+            << ": Swapped position" << mainPosition << "(Cam" << oldMainCamera << ")"
+            << "with position" << clickedPosition << "(Cam" << clickedGlobalIndex << ")";
+    qInfo() << "[Swap] Camera" << clickedGlobalIndex << "is now main on page" << (currentPage + 1);
+    
+    refreshGrid();
+}
+
+void MainWindow::updateLockButton() {
+    if (!m_lockButton) return;
+    
+    if (m_isMainCameraLocked) {
+        m_lockButton->setText("🔒");
+        m_lockButton->setStyleSheet(
+            "QPushButton {"
+            "   background: rgba(255,165,0,0.7);"
+            "   border: 2px solid white;"
+            "   border-radius: 20px;"
+            "   color: white;"
+            "   font-size: 18px;"
+            "}"
+            "QPushButton:hover {"
+            "   background: rgba(255,140,0,0.9);"
+            "}"
+        );
+        m_lockButton->setToolTip("Unlock camera");
+    } else {
+        m_lockButton->setText("🔓");
+        m_lockButton->setStyleSheet(
+            "QPushButton {"
+            "   background: rgba(0,0,0,0.6);"
+            "   border: 2px solid white;"
+            "   border-radius: 20px;"
+            "   color: white;"
+            "   font-size: 18px;"
+            "}"
+            "QPushButton:hover {"
+            "   background: rgba(50,50,50,0.8);"
+            "}"
+        );
+        m_lockButton->setToolTip("Lock this camera as main view");
+    }
 }
 
 void MainWindow::refreshGrid() {
@@ -394,6 +556,14 @@ void MainWindow::refreshGridDefault() {
     for (int c = 0; c < 5; ++c) {
         gridLayout->setColumnStretch(c, c < 3 ? 1 : 0);
         gridLayout->setColumnMinimumWidth(c, 0);
+    }
+
+    for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
+        QWidget* w = labels[i];
+        QList<QPushButton*> oldSwapButtons = w->findChildren<QPushButton*>("swapButton");
+        for (QPushButton* btn : oldSwapButtons) {
+            btn->deleteLater();
+        }
     }
 
     std::vector<QWidget*> pageWidgets;
@@ -423,6 +593,20 @@ void MainWindow::refreshGridDefault() {
 
             QWidget* w = labels[globalIndex];
             w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            w->setCursor(Qt::ArrowCursor);
+            
+            QLabel* nameLabel = w->property("cameraNameLabel").value<QLabel*>();
+            if (nameLabel) {
+                nameLabel->raise();
+                nameLabel->show();
+            }
+            
+            ClickableLabel* clickLabel = qobject_cast<ClickableLabel*>(w);
+            if (clickLabel) {
+                disconnect(clickLabel, &ClickableLabel::clicked, this, nullptr);
+                connect(clickLabel, &ClickableLabel::clicked, 
+                        this, &MainWindow::showFullScreenFeed);
+            }
 
             qInfo() << "  slot" << slot
                     << "visibleIndex" << visibleIndex
@@ -449,13 +633,43 @@ void MainWindow::refreshGridDefault() {
 }
 
 void MainWindow::refreshGridCustom() {
-    const int camerasPerCustomPage = 9;
+    std::vector<int> camerasToDisplay;
     const int page = gridState.currentPage();
-    const int startIndex = page * camerasPerCustomPage;
     
-    qInfo() << "[MainWindow] refreshGridCustom page" << page
-            << "visibleCount" << gridState.visibleCount()
-            << "startIndex" << startIndex;
+    if (m_isMainCameraLocked && m_lockedCameraGlobalIndex >= 0) {
+        camerasToDisplay.push_back(m_lockedCameraGlobalIndex);
+        
+        const int secondaryStartIndex = page * 8;
+        int collected = 0;
+        int scanIndex = 0;
+        
+        for (int i = 0; i < static_cast<int>(visibleOrder.size()) && collected < 8; ++i) {
+            int cam = visibleOrder[i];
+            if (cam != m_lockedCameraGlobalIndex) {
+                if (scanIndex >= secondaryStartIndex) {
+                    camerasToDisplay.push_back(cam);
+                    collected++;
+                }
+                scanIndex++;
+            }
+        }
+        
+        qInfo() << "[MainWindow] refreshGridCustom LOCKED page" << (page + 1)
+                << "main=" << m_lockedCameraGlobalIndex
+                << "secondary count=" << collected;
+    } else {
+        const int startIndex = page * 9;
+        
+        for (int i = 0; i < 9; ++i) {
+            int index = startIndex + i;
+            if (index < static_cast<int>(visibleOrder.size())) {
+                camerasToDisplay.push_back(visibleOrder[index]);
+            }
+        }
+        
+        qInfo() << "[MainWindow] refreshGridCustom UNLOCKED page" << (page + 1)
+                << "showing" << camerasToDisplay.size() << "cameras";
+    }
 
     QLayoutItem* item;
     while ((item = gridLayout->takeAt(0)) != nullptr) {
@@ -478,50 +692,369 @@ void MainWindow::refreshGridCustom() {
         gridLayout->setColumnMinimumWidth(c, 160);
     }
 
-    int camerasToShow = std::min(camerasPerCustomPage, 
-                                 static_cast<int>(visibleOrder.size()) - startIndex);
-
-    for (int i = 0; i < camerasToShow; ++i) {
-        int visibleIndex = startIndex + i;
-        if (visibleIndex < 0 || visibleIndex >= static_cast<int>(visibleOrder.size())) {
-            continue;
+    for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
+        QWidget* w = labels[i];
+        QList<QPushButton*> oldSwapButtons = w->findChildren<QPushButton*>("swapButton");
+        for (QPushButton* btn : oldSwapButtons) {
+            btn->deleteLater();
         }
+    }
 
-        int globalIndex = visibleOrder[visibleIndex];
+    for (size_t i = 0; i < camerasToDisplay.size(); ++i) {
+        int globalIndex = camerasToDisplay[i];
         if (globalIndex < 0 || globalIndex >= static_cast<int>(labels.size())) {
             continue;
         }
 
         QWidget* w = labels[globalIndex];
         w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        
+        if (i == 0 && m_isMainCameraLocked) {
+            w->setStyleSheet(
+                "border:3px solid orange; "
+                "border-radius:5px; "
+                "background:#000;"
+            );
+            w->setCursor(Qt::ArrowCursor);
+        } else if (i == 0) {
+            w->setStyleSheet(
+                "border:2px solid #333; "
+                "border-radius:5px; "
+                "background:#000;"
+            );
+            w->setCursor(Qt::ArrowCursor);
+        } else {
+            w->setStyleSheet(
+                "border:2px solid #333; "
+                "border-radius:5px; "
+                "background:#000;"
+            );
+            w->setCursor(Qt::ArrowCursor);
+        }
+        
         w->show();
+        
+        QLabel* nameLabel = w->property("cameraNameLabel").value<QLabel*>();
+        if (nameLabel) {
+            nameLabel->raise();
+            nameLabel->show();
+        }
+        
+        ClickableLabel* clickLabel = qobject_cast<ClickableLabel*>(w);
+        if (clickLabel) {
+            disconnect(clickLabel, &ClickableLabel::clicked, this, nullptr);
+            connect(clickLabel, &ClickableLabel::clicked, 
+                    this, &MainWindow::showFullScreenFeed);
+        }
 
         if (i == 0) {
             gridLayout->addWidget(w, 0, 0, 3, 4);
+            
+            if (!m_lockButton) {
+                m_lockButton = new QPushButton(w);
+                m_lockButton->setFixedSize(40, 40);
+                connect(m_lockButton, &QPushButton::clicked, 
+                        this, &MainWindow::toggleMainCameraLock);
+            }
+            
+            m_lockButton->setParent(w);
+            QTimer::singleShot(0, this, [this, w]() {
+                if (m_lockButton && w) {
+                    m_lockButton->move(w->width() - m_lockButton->width() - 10, 10);
+                    m_lockButton->raise();
+                }
+            });
+            updateLockButton();
+            m_lockButton->show();
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> main (0,0,3,4)";
         } else if (i == 1) {
             gridLayout->addWidget(w, 0, 4, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> right1 (0,4)";
         } else if (i == 2) {
             gridLayout->addWidget(w, 1, 4, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> right2 (1,4)";
         } else if (i == 3) {
             gridLayout->addWidget(w, 2, 4, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> right3 (2,4)";
         } else if (i == 4) {
             gridLayout->addWidget(w, 3, 0, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom1 (3,0)";
         } else if (i == 5) {
             gridLayout->addWidget(w, 3, 1, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom2 (3,1)";
         } else if (i == 6) {
             gridLayout->addWidget(w, 3, 2, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom3 (3,2)";
         } else if (i == 7) {
             gridLayout->addWidget(w, 3, 3, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom4 (3,3)";
         } else if (i == 8) {
             gridLayout->addWidget(w, 3, 4, 1, 1);
+            
+            QPushButton* swapBtn = new QPushButton("⇄", w);
+            swapBtn->setObjectName("swapButton");
+            swapBtn->setFixedSize(35, 35);
+            swapBtn->setStyleSheet(
+                "QPushButton {"
+                "  background: rgba(0, 0, 0, 180);"
+                "  color: white;"
+                "  border: 2px solid #555;"
+                "  border-radius: 5px;"
+                "  font-size: 18px;"
+                "  font-weight: bold;"
+                "}"
+                "QPushButton:hover {"
+                "  background: rgba(50, 150, 255, 200);"
+                "  border: 2px solid #3296ff;"
+                "}"
+            );
+            swapBtn->setCursor(Qt::PointingHandCursor);
+            swapBtn->setVisible(!m_isMainCameraLocked);
+            
+            int capturedGlobalIndex = globalIndex;
+            connect(swapBtn, &QPushButton::clicked, this, [this, capturedGlobalIndex]() {
+                swapSecondaryToMain(capturedGlobalIndex);
+            });
+            
+            QTimer::singleShot(0, this, [swapBtn, w]() {
+                if (swapBtn && w) {
+                    swapBtn->move(w->width() - swapBtn->width() - 5, 5);
+                    swapBtn->raise();
+                }
+            });
+            
             qInfo() << "  camera" << i << "globalIndex" << globalIndex << "-> bottom5 (3,4)";
         }
     }
@@ -531,16 +1064,24 @@ void MainWindow::nextPage() {
     qInfo() << "[MainWindow] nextPage() called";
     
     if (m_isCustomLayout) {
-        const int camerasPerCustomPage = 9;
-        const int visibleCount = static_cast<int>(visibleOrder.size());
-        const int totalPages = (visibleCount + camerasPerCustomPage - 1) / camerasPerCustomPage;
-        const int currentPage = gridState.currentPage();
+        int visibleCount = static_cast<int>(visibleOrder.size());
+        int totalPages;
         
+        if (m_isMainCameraLocked && m_lockedCameraGlobalIndex >= 0) {
+            int availableSecondary = visibleCount - 1;
+            totalPages = (availableSecondary + 7) / 8;
+        } else {
+            totalPages = (visibleCount + 8) / 9;
+        }
+        
+        if (totalPages < 1) totalPages = 1;
+        
+        const int currentPage = gridState.currentPage();
         if (currentPage + 1 < totalPages) {
             gridState.setCurrentPage(currentPage + 1);
         }
     } else {
-        gridState.nextPage();
+    gridState.nextPage();
     }
     
     updateToolbarPageInfo();
@@ -556,7 +1097,7 @@ void MainWindow::previousPage() {
             gridState.setCurrentPage(currentPage - 1);
         }
     } else {
-        gridState.previousPage();
+    gridState.previousPage();
     }
     
     updateToolbarPageInfo();
@@ -615,6 +1156,20 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     QMainWindow::resizeEvent(event);
     for (ClickableLabel* label : labels) {
         label->setMinimumSize(1, 1);
+        
+        QLabel* nameLabel = label->property("cameraNameLabel").value<QLabel*>();
+        if (nameLabel) {
+            nameLabel->move(10, 10);
+            nameLabel->raise();
+        }
+    }
+    
+    if (m_lockButton && m_lockButton->isVisible()) {
+        QWidget* parent = m_lockButton->parentWidget();
+        if (parent) {
+            m_lockButton->move(parent->width() - m_lockButton->width() - 10, 10);
+            m_lockButton->raise();
+        }
     }
 }
 
