@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <QUrl>
 #include <QMutexLocker>
+#include <QHostInfo>
 
 #include <QtGlobal>
 #include <chrono>
@@ -23,24 +24,6 @@ QString sanitizeUrl(const QString& url)
     QString safe = url;
     safe.replace('"', QStringLiteral("%22"));
     return safe;
-}
-
-QString makeH264Launch(const QString& url)
-{
-    const QString tpl = QStringLiteral(
-        "rtspsrc location=\"%1\" protocols=tcp latency=200 drop-on-latency=true "
-        "! rtph264depay ! h264parse config-interval=-1 "
-        "! rtph264pay name=pay0 pt=96 config-interval=1");
-    return tpl.arg(sanitizeUrl(url));
-}
-
-QString makeH265Launch(const QString& url)
-{
-    const QString tpl = QStringLiteral(
-        "rtspsrc location=\"%1\" protocols=tcp latency=200 drop-on-latency=true "
-        "! rtph265depay ! h265parse "
-        "! rtph265pay name=pay0 pt=96 config-interval=1");
-    return tpl.arg(sanitizeUrl(url));
 }
 
 } // namespace
@@ -169,17 +152,23 @@ void NodeRestreamer::stop()
     lk.unlock();
 }
 
+bool NodeRestreamer::isRunning() const
+{
+    std::unique_lock<std::mutex> lk(m_stateMutex);
+    return m_running;
+}
+
 QString NodeRestreamer::proxyUrlForCamera(int cameraId) const
 {
     QMutexLocker locker(&m_cameraMutex);
     if (!m_cameras.contains(cameraId)) {
         return {};
     }
-    const QString host = m_cfg.apiBindHost.isEmpty() ? QStringLiteral("127.0.0.1")
-                                                     : m_cfg.apiBindHost;
+    const QString host = advertisedHost();
+    const quint16 port = advertisedPort();
     return QString("rtsp://%1:%2%3")
         .arg(host)
-        .arg(m_cfg.rtspProxyPort)
+        .arg(port)
         .arg(makeMountPath(cameraId));
 }
 
@@ -285,10 +274,33 @@ void NodeRestreamer::addMountForCamera(int cameraId)
 
 QString NodeRestreamer::buildPipeline(const CameraEntry& entry) const
 {
-    if (entry.useH265) {
-        return makeH265Launch(entry.url);
+    const bool lowLatency = m_cfg.lowLatency;
+    const int baseLatency = qMax(10, m_cfg.rtspSourceLatencyMs);
+    const int srcLatency = lowLatency ? qMax(5, baseLatency / 2) : baseLatency;
+    const QString proto = m_cfg.rtspForceTcp ? QStringLiteral("tcp")
+                                             : QStringLiteral("udp");
+
+    QString pipeline = QStringLiteral("rtspsrc location=\"%1\" protocols=%2 latency=%3 drop-on-latency=true ")
+                           .arg(sanitizeUrl(entry.url))
+                           .arg(proto)
+                           .arg(srcLatency);
+
+    if (m_cfg.enableRtpJitterBuffer) {
+        const int jitterLatency = qMax(5, m_cfg.rtpJitterBufferLatencyMs);
+        pipeline += QStringLiteral("! rtpjitterbuffer latency=%1 drop-on-late=true mode=slave ")
+                        .arg(jitterLatency);
     }
-    return makeH264Launch(entry.url);
+
+    pipeline += codecTail(entry);
+    return pipeline;
+}
+
+QString NodeRestreamer::codecTail(const CameraEntry& entry) const
+{
+    if (entry.useH265) {
+        return QStringLiteral("! rtph265depay ! h265parse ! rtph265pay name=pay0 pt=96 config-interval=1");
+    }
+    return QStringLiteral("! rtph264depay ! h264parse config-interval=-1 ! rtph264pay name=pay0 pt=96 config-interval=1");
 }
 
 void NodeRestreamer::teardownAfterLoop()
@@ -324,4 +336,24 @@ gboolean NodeRestreamer::invokeStopLoop(gpointer data)
         g_main_loop_quit(self->m_loop);
     }
     return G_SOURCE_REMOVE;
+}
+
+QString NodeRestreamer::advertisedHost() const
+{
+    if (!m_cfg.advertiseHost.isEmpty()) {
+        return m_cfg.advertiseHost;
+    }
+    if (m_cfg.apiBindHost.isEmpty() || m_cfg.apiBindHost == QStringLiteral("0.0.0.0")) {
+        const QString hostName = QHostInfo::localHostName();
+        if (!hostName.isEmpty()) {
+            return hostName;
+        }
+        return QStringLiteral("127.0.0.1");
+    }
+    return m_cfg.apiBindHost;
+}
+
+quint16 NodeRestreamer::advertisedPort() const
+{
+    return m_cfg.advertiseRtspPort ? m_cfg.advertiseRtspPort : m_cfg.rtspProxyPort;
 }

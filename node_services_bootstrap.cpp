@@ -5,8 +5,10 @@
  *   curl -H "Authorization: Bearer $TOKEN" http://$NODE:8080/api/v1/node/info
  *   curl -H "Authorization: Bearer $TOKEN" http://$NODE:8080/api/v1/cameras
  *   curl -H "Authorization: Bearer $TOKEN" "http://$NODE:8080/api/v1/recordings?camera_id=1&from=2024-05-01T00:00:00Z&to=2024-05-01T23:59:59Z"
- *   curl -H "Authorization: Bearer $TOKEN" http://$NODE:8080/media/segments/12345 -o clip.mkv
+ *   curl -H "Authorization: Bearer $TOKEN" -H "Range: bytes=0-1023" http://$NODE:8080/media/segments/12345 -o first-kb.bin
+ *   curl -I -H "Authorization: Bearer $TOKEN" http://$NODE:8080/media/segments/12345
  *   gst-play-1.0 rtsp://$NODE:8554/cam/1
+ *   ffplay -rtsp_transport tcp rtsp://$NODE:8554/cam/1
  */
 #include "node_services_bootstrap.h"
 

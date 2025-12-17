@@ -9,6 +9,13 @@ struct NodeConfig {
     quint16 apiBindPort;
     QString apiToken;
     quint16 rtspProxyPort;
+    QString advertiseHost;
+    quint16 advertiseRtspPort;
+    bool lowLatency = false;
+    int rtspSourceLatencyMs = 150;
+    bool rtspForceTcp = true;
+    bool enableRtpJitterBuffer = false;
+    int rtpJitterBufferLatencyMs = 50;
 };
 
 class NodeConfigService {

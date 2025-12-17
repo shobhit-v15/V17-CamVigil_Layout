@@ -62,13 +62,17 @@ NodeCoreService::~NodeCoreService()
     }
 }
 
+namespace {
+const QString kNodeVersion = QStringLiteral("camvigil-node-v1");
+}
+
 NodeInfo NodeCoreService::getNodeInfo() const
 {
     NodeInfo info;
     info.nodeId = m_cfg.nodeId;
     info.buildingId = m_cfg.buildingId;
     info.hostname = QHostInfo::localHostName();
-    info.softwareVersion = QStringLiteral("TODO-version"); // TODO: wire to build/version metadata.
+    info.softwareVersion = softwareVersion();
     const QDateTime now = QDateTime::currentDateTimeUtc();
     info.uptimeSeconds = m_startupTime.secsTo(now);
 
@@ -220,21 +224,80 @@ QVector<NodeSegment> NodeCoreService::listSegments(int cameraId,
 
 QString NodeCoreService::resolveSegmentPath(qint64 segmentId) const
 {
-    if (!m_db.isValid() || !m_db.isOpen() || segmentId <= 0) {
-        return QString();
+    bool found = false;
+    const NodeSegment seg = segmentById(segmentId, &found);
+    if (!found) {
+        return {};
+    }
+    return QFileInfo(seg.filePath).absoluteFilePath();
+}
+
+NodeSegment NodeCoreService::segmentById(qint64 segmentId, bool* found) const
+{
+    if (found) {
+        *found = false;
+    }
+    NodeSegment seg;
+    if (!isDatabaseOk() || segmentId <= 0) {
+        return seg;
     }
 
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT file_path FROM segments WHERE id=:id;"));
+    q.prepare(QStringLiteral("SELECT id, camera_id, start_utc_ns, end_utc_ns, duration_ms, size_bytes, file_path "
+                             "FROM segments WHERE id=:id;"));
     q.bindValue(":id", segmentId);
     if (!q.exec()) {
-        qWarning() << "[NodeCoreService] resolveSegmentPath query failed:" << q.lastError().text();
-        return QString();
+        qWarning() << "[NodeCoreService] segmentById query failed:" << q.lastError().text();
+        return seg;
     }
-    if (q.next()) {
-        return QFileInfo(q.value(0).toString()).absoluteFilePath();
+    if (!q.next()) {
+        return seg;
     }
-    return QString();
+
+    seg.segmentId = q.value(0).toLongLong();
+    seg.cameraId = q.value(1).toInt();
+    const qint64 startNs = q.value(2).toLongLong();
+    const qint64 endNs = q.value(3).toLongLong();
+    seg.start = nsToDateTime(startNs);
+    if (endNs > 0) {
+        seg.end = nsToDateTime(endNs);
+    } else if (q.value(4).toLongLong() > 0) {
+        seg.end = nsToDateTime(startNs + q.value(4).toLongLong() * 1000000LL);
+    }
+    seg.durationSec = q.value(4).toLongLong() / 1000;
+    seg.sizeBytes = static_cast<quint64>(q.value(5).toLongLong());
+    seg.filePath = q.value(6).toString();
+    if (found) {
+        *found = true;
+    }
+    return seg;
+}
+
+bool NodeCoreService::isDatabaseOk() const
+{
+    return m_db.isValid() && m_db.isOpen();
+}
+
+bool NodeCoreService::isRtspOk() const
+{
+    return m_restreamer && m_restreamer->isRunning();
+}
+
+int NodeCoreService::cameraCount() const
+{
+    if (!isDatabaseOk()) {
+        return 0;
+    }
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral("SELECT COUNT(*) FROM cameras;")) && q.next()) {
+        return q.value(0).toInt();
+    }
+    return 0;
+}
+
+QString NodeCoreService::softwareVersion() const
+{
+    return kNodeVersion;
 }
 
 QDateTime NodeCoreService::nsToDateTime(qint64 ns)

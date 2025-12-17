@@ -18,11 +18,6 @@ typedef unsigned int guint;
 typedef int gboolean;
 typedef void* gpointer;
 
-struct NodeCameraRtspInfo {
-    int cameraId;
-    QString mainRtspUrl;
-};
-
 class NodeRestreamer : public QObject {
     Q_OBJECT
 public:
@@ -32,6 +27,7 @@ public:
     void registerCamera(int cameraId, const QString& rtspMainUrl, bool useH265 = false);
     bool start();
     void stop();
+    bool isRunning() const;
 
     QString proxyUrlForCamera(int cameraId) const;
 
@@ -66,6 +62,9 @@ private:
     void addAllCamerasOnContext();
     void addMountForCamera(int cameraId);
     QString buildPipeline(const CameraEntry& entry) const;
+    QString codecTail(const CameraEntry& entry) const;
+    QString advertisedHost() const;
+    quint16 advertisedPort() const;
     void teardownAfterLoop();
     static gboolean invokeAddCamera(gpointer data);
     static gboolean invokeStopLoop(gpointer data);

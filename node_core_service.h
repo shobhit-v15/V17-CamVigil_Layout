@@ -70,6 +70,11 @@ public:
                                       const QDateTime& from,
                                       const QDateTime& to) const;
     QString resolveSegmentPath(qint64 segmentId) const;
+    NodeSegment segmentById(qint64 segmentId, bool* found = nullptr) const;
+    bool isDatabaseOk() const;
+    bool isRtspOk() const;
+    int cameraCount() const;
+    QString softwareVersion() const;
 
 private:
     DbReader* m_dbReader{};
