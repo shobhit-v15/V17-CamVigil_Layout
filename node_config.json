@@ -1,0 +1,9 @@
+{
+  "node_id": "buildingA_node1",
+  "building_id": "Building-A",
+  "api_bind_host": "0.0.0.0",
+  "api_bind_port": 8080,
+  "api_token": "password",
+  "rtsp_proxy_port": 8555
+}
+

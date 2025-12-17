@@ -11,7 +11,7 @@ DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000
 
 # Use pkg-config to handle OpenCV and GStreamer includes/libs
 CONFIG += link_pkgconfig
-PKGCONFIG += opencv4 gstreamer-1.0 gstreamer-video-1.0 gstreamer-app-1.0 glib-2.0 gstreamer-gl-1.0
+PKGCONFIG += opencv4 gstreamer-1.0 gstreamer-video-1.0 gstreamer-app-1.0 glib-2.0 gstreamer-gl-1.0 gstreamer-rtsp-server-1.0
 
 # Added linker flags for libudev (required for hotplug support)
 LIBS += -Wl,--no-as-needed -ludev -Wl,--as-needed
@@ -19,6 +19,8 @@ LIBS += -Wl,--no-as-needed -ludev -Wl,--as-needed
 LIBS += -lGL
 
 LIBS += -lgstreamer-1.0 -lgstvideo-1.0 -lgstapp-1.0 -lgstbase-1.0 -lgobject-2.0 -lglib-2.0
+# Explicit link for RTSP server bits (gstreamer pkg-config may cover this on some distros)
+LIBS += -lgstrtspserver-1.0
 
 QT += dbus concurrent
 
@@ -30,6 +32,11 @@ SOURCES += \
     cameragridstate.cpp \
     cameramanager.cpp \
     camerastreams.cpp \
+    node_config.cpp \
+    node_restreamer.cpp \
+    node_core_service.cpp \
+    node_api_server.cpp \
+    node_services_bootstrap.cpp \
     db_reader.cpp \
     db_writer.cpp \
     fullscreenviewer.cpp \
@@ -74,6 +81,11 @@ HEADERS += \
     cameragridstate.h \
     cameramanager.h \
     camerastreams.h \
+    node_config.h \
+    node_restreamer.h \
+    node_core_service.h \
+    node_api_server.h \
+    node_services_bootstrap.h \
     clickablelabel.h \
     db_reader.h \
     db_writer.h \

@@ -28,3 +28,4 @@ cmake_install.cmake
 
 # Other build dirs
 build*/
+CamVigil_Node/V1_CamVigil_Node/tmp_camvigil.sqlite
